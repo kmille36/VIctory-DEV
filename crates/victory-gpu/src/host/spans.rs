@@ -166,11 +166,26 @@ pub(crate) fn stamped(at: usize, now: u64) {
     }
 }
 
-/// The viewports' sizes seen (each said once): whether the title draws its
-/// scene at sizes of its choice.
+/// Viewports set since the last frame-rate line, by size.
+static VIEWPORTS: Mutex<Vec<((u32, u32), u64)>> = Mutex::new(Vec::new());
+
+/// The viewports' sizes seen (each said once), and how often each is set a
+/// frame (on the frame-rate line): whether the title draws its scene at
+/// sizes of its choice, and at which. From 320 x 180 on, so that a scene
+/// drawn below 1024 x 576 (a dynamic resolution at work, 960 x 540 say) is
+/// seen too.
 pub(crate) fn viewport(width: u32, height: u32) {
-    if !on() || width < 1024 || height < 576 {
+    if !on() || width < 320 || height < 180 {
         return;
+    }
+    {
+        let mut counts = VIEWPORTS.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((_, n)) = counts.iter_mut().find(|(size, _)| *size == (width, height)) {
+            *n += 1;
+        } else if counts.len() < 64 {
+            // (Bounded: sizes past these are left out of the census.)
+            counts.push(((width, height), 1));
+        }
     }
     static SEEN: Mutex<Vec<(u32, u32)>> = Mutex::new(Vec::new());
     let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
@@ -178,6 +193,22 @@ pub(crate) fn viewport(width: u32, height: u32) {
         seen.push((width, height));
         tracing::info!(width, height, "a viewport of the title");
     }
+}
+
+/// The census of [`viewport`] as text, the most set first, per frame; it
+/// starts again.
+fn viewport_census(frames: f64) -> Option<String> {
+    let mut counts = std::mem::take(&mut *VIEWPORTS.lock().unwrap_or_else(|e| e.into_inner()));
+    if counts.is_empty() {
+        return None;
+    }
+    counts.sort_by_key(|&(size, n)| (std::cmp::Reverse(n), size));
+    let text: Vec<String> = counts
+        .iter()
+        .take(12)
+        .map(|((w, h), n)| format!("{w}x{h} {:.1}", *n as f64 / frames.max(1.0)))
+        .collect();
+    Some(text.join(", "))
 }
 
 /// For the frame-rate line: what the stamps read since the last one say, per
@@ -193,6 +224,9 @@ pub(super) fn line(frames: f64) {
             );
         }
         (s.0, s.1) = (0, 0);
+    }
+    if let Some(census) = viewport_census(frames) {
+        tracing::info!("viewports the title set per frame, by size (from 320x180): {census}");
     }
     let mut made = SPANS_MADE.lock().unwrap_or_else(|e| e.into_inner());
     let Some(Some(spans)) = made.as_mut() else {
