@@ -2,7 +2,7 @@
 
 ## Run the codec_d Windows build
 
-Download and extract the Windows x64 ZIP from the [private releases](https://github.com/codec-d/cool_fox/releases/latest). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
+Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases/latest). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
 
 ```powershell
 $env:VICTORY_GAME_DIR = 'D:\Games\MyDump'
