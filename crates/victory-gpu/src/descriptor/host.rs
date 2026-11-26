@@ -1153,6 +1153,23 @@ pub(crate) fn device_removed() -> Option<String> {
 pub(crate) static PLACED_TEXTURE_SLOTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 pub(crate) static OBJECT_TEXTURE_SLOTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// Whether typed buffer views of integer formats are marked as such in the
+/// stride table, so that the 16-bit typed accesses (`_d16`) of programs
+/// that pick them by index pass their bits (9a6c829). On by default;
+/// `VICTORY_VIEW_INTEGER=0` leaves every view unmarked, as before that
+/// change (the d16 data is then converted as a float's): a diagnostic
+/// switch to tell whether a picture difference comes from that path.
+fn integer_views_kept() -> bool {
+    static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ON.get_or_init(|| {
+        let on = std::env::var_os("VICTORY_VIEW_INTEGER").is_none_or(|v| v != "0");
+        if !on {
+            tracing::info!("typed buffer views of integer formats left unmarked (VICTORY_VIEW_INTEGER=0)");
+        }
+        on
+    })
+}
+
 /// Bytes per element and typed integer format bits of a buffer view, decoded
 /// in a single pass over the view descriptor; `(None, 0)` if not a buffer view.
 fn view_stride_and_kind(view: &View) -> (Option<u32>, u32) {
@@ -1167,7 +1184,7 @@ fn view_stride_and_kind(view: &View) -> (Option<u32>, u32) {
     } else {
         crate::resource::element(format).map_or(0, |(bytes, _)| bytes as u32)
     };
-    let kind = if stride == 0 && !raw {
+    let kind = if stride == 0 && !raw && integer_views_kept() {
         match format {
             3 | 7 | 12 | 17 | 25 | 30 | 36 | 42 | 50 | 57 | 62 => VIEW_INTEGER,
             4 | 8 | 14 | 18 | 32 | 38 | 43 | 52 | 59 | 64 => VIEW_INTEGER | VIEW_SIGNED,
