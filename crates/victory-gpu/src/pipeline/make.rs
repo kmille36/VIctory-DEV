@@ -152,8 +152,14 @@ impl Pending {
 
 /// Why a pipeline has no host pipeline (diagnostics): its shaders that do
 /// not translate, else "refused" or "being made"; `None` if it has one.
+/// A pipeline left out on purpose ([`left_out`]) is never made: it says
+/// why, not "being made" (each frame's ~600 indirect dispatches of the
+/// ray-tracing resolves passed for pipelines in the making, run z3a).
 #[cfg(feature = "diagnostics")]
 pub(crate) fn missing(p: &Pending) -> Option<String> {
+    if let Some(why) = p.left_out {
+        return Some(why.to_owned());
+    }
     match p.made.get() {
         Some(Some(_)) => None,
         None => Some("being made".into()),
