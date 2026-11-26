@@ -715,6 +715,7 @@ fn card_clock_watch(clock: &'static CardClock) {
         let mut state = clock.state.lock().unwrap_or_else(|e| e.into_inner());
         if state.0 == target && state.1.is_none() {
             state.1 = Some((std::time::Instant::now(), worked()));
+            awake::card_idle(true);
         }
     }
 }
@@ -4148,6 +4149,7 @@ impl Host {
         };
         let mut state = clock.state.lock().unwrap_or_else(|e| e.into_inner());
         state.0 += 1;
+        awake::card_idle(false);
         // SAFETY: our queue and the clock's fence.
         let _ = unsafe { self.queue.Signal(&clock.fence, state.0) };
         if let Some((since, worked_then)) = state.1.take() {
