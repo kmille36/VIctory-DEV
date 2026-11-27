@@ -60,31 +60,35 @@ pub fn parse_output(spec: &str) -> Option<(u32, u32)> {
     MODES.contains(&size).then_some(size)
 }
 
-/// `VICTORY_RENDER_SCALE=<s>`, 0.5 to 1.0 (0.5: half the output's width and
-/// height): the title's own upscaler's scale (Series X; 2/3 without it).
+/// `VICTORY_RENDER_SCALE=<s>`, 0.25 to 1.0 (0.4: 768x432 from a 1080p
+/// output): the title's own upscaler's scale (Series X; 2/3 without it).
 /// Tested at 1.0 (run res-4); below 2/3 the title's largest render size
-/// (+0x94, max(2/3, scale)) stays at 2/3. `None` if unset or out of range
-/// (said why).
+/// (+0x94, max(2/3, scale)) stays at 2/3. Widened from Belobug's 0.5–1.0
+/// on branch 1660s: 0.4, 1/3 and 0.25 are clean per victory-gtx1660's
+/// measurements; below 0.25 the title faults in its own code. `None` if
+/// unset or out of range (said why).
 pub fn asked_render_scale() -> Option<f32> {
     let spec = std::env::var("VICTORY_RENDER_SCALE").ok()?;
     let scale = parse_render_scale(&spec);
     if scale.is_none() {
-        eprintln!("VIctory: VICTORY_RENDER_SCALE={spec}: expected 0.5 to 1.0");
+        eprintln!("VIctory: VICTORY_RENDER_SCALE={spec}: expected 0.25 to 1.0");
     }
     scale
 }
 
 pub fn parse_render_scale(spec: &str) -> Option<f32> {
-    spec.trim().parse::<f32>().ok().filter(|s| (0.5..=1.0).contains(s))
+    spec.trim().parse::<f32>().ok().filter(|s| (0.25..=1.0).contains(s))
 }
 
-/// `VICTORY_FFX_SCALE=<s>`, 0.5 to 1.0: FidelityFX's render scale (Series
-/// S). Crashed at 0.5 (run res-6); see the module's notes.
+/// `VICTORY_FFX_SCALE=<s>`, 0.25 to 1.0 (shared parser with
+/// `VICTORY_RENDER_SCALE`; the low end is for the title's own upscaler,
+/// not FidelityFX): FidelityFX's render scale (Series S). Crashed at 0.5
+/// (run res-6); see the module's notes.
 pub fn asked_ffx_scale() -> Option<f32> {
     let spec = std::env::var("VICTORY_FFX_SCALE").ok()?;
     let scale = parse_render_scale(&spec);
     if scale.is_none() {
-        eprintln!("VIctory: VICTORY_FFX_SCALE={spec}: expected 0.5 to 1.0");
+        eprintln!("VIctory: VICTORY_FFX_SCALE={spec}: expected 0.25 to 1.0");
     }
     scale
 }
@@ -339,7 +343,9 @@ mod tests {
         assert_eq!(parse_render_scale("0.67"), Some(0.67));
         assert_eq!(parse_render_scale("0.5"), Some(0.5));
         assert_eq!(parse_render_scale("1"), Some(1.0));
-        assert_eq!(parse_render_scale("0.4"), None);
+        assert_eq!(parse_render_scale("0.4"), Some(0.4));
+        assert_eq!(parse_render_scale("0.25"), Some(0.25));
+        assert_eq!(parse_render_scale("0.2"), None);
         assert_eq!(parse_render_scale("1.5"), None);
     }
 
