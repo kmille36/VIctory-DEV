@@ -1,5 +1,76 @@
 # VIctory on an RX 7900 XTX
 
+## Branch 1660s: GTX 1660 6 GB
+
+This branch is `main` (the codec_d Windows build below) plus every patch
+from [Impre-visible/victory-gtx1660](https://github.com/Impre-visible/victory-gtx1660)
+— 0001, 0002 and the optional 0003, 0004, 0006, 0007 (there is no 0005) —
+which took the title from about 360–410 ms a frame to about 100 ms a frame
+(about 10 fps) on a GeForce GTX 1660 6 GB under Linux. No game files.
+
+| Patch | What it does | On by default |
+|---|---|---|
+| 0001 | Shader translation: every loop has one branch back, so vkd3d-proton's DXIL-to-SPIR-V converter stops recursing to a stack overflow on multi-latch loops | yes (always) |
+| 0002 | `VICTORY_TEXTURE_MIP_DROP=0..3`: host copies of large placed textures start that many mip levels down, so the title's textures fit in 6 GB | no (`0`) |
+| 0003 | Diagnostics: `VICTORY_CARD_SPANS=1` adds a census of the viewports the title sets per frame to the frame-rate line | no |
+| 0004 | `VICTORY_CARD_AWAKE=idle`: keep the card awake only while the drawing queue has nothing to run | no |
+| 0006 | Diagnostics: a pipeline left out on purpose is reported with its reason instead of "being made" | yes (diagnostics builds) |
+| 0007 | `VICTORY_VIEW_INTEGER=0`: leave typed buffer views of integer formats unmarked, to test whether missing heads come from that path | yes (the switch turns it off) |
+
+The patches alone do not give the ~100 ms figure. Most of the gain comes
+from three settings (measured on the patch author's machine: GTX 1660 6 GB,
+Core i7-13700KF, 62 GB RAM, Arch Linux, NVIDIA driver 620.73.04, GE-Proton11-6
+with vkd3d-proton, first playable scene, Series S profile):
+
+```powershell
+$env:VICTORY_CARD_BUFFERS_MB = '1024'
+$env:VICTORY_CARD_WINDOWS_MB = '256'
+$env:VICTORY_TEXTURE_MIP_DROP = '1'
+$env:VICTORY_LEVELS_ON_DEMAND = '0'
+```
+
+`CARD_BUFFERS_MB=1024` carries the gain: below it the frame time returns to
+about 275 ms. The copies go to the card only while a fifth of the card's
+memory budget is free; on Windows that budget is what the system grants this
+process, so close other programs that use the GPU. If video memory runs
+short, raise the mip drop to 2 or 3 (softer textures). Do not lower
+`CARD_BUFFERS_MB` below 1024.
+
+Measured on that machine: cool_fox unmodified 360–410 ms (2.4–2.8 fps);
+patches + `LEVELS_ON_DEMAND=0` + mip drop 2: 271–291 ms (3.4–3.7 fps);
+the settings above: 98–112 ms (9–10 fps, five clean runs). Longer runs at
+768x432 internal render, mip drop 3, `CARD_BUFFERS_MB=640`: 56–57 ms
+(about 17–18 fps) standing still, 50–60 ms walking through the opening,
+67–78 ms on the boat outdoors, 93–120 ms near a wooded shore — but those
+longer runs used additional work not in these patches (renderer port 1,
+a render-scale switch, skipping ray-tracing-only passes, the wineserver
+patch). True 720p at 20 fps is out of reach of this card by these numbers.
+
+Honest limits, from the patch author's own notes:
+
+- All figures are Linux figures (Proton + vkd3d-proton). Windows was not
+  tested by the patch author; the texture and memory settings matter most
+  on cards with 6–8 GB.
+- A tester with a GTX 1660 SUPER on Windows 11 reports the cool_fox fork
+  does not get past the start screens with NVIDIA's driver, while it does
+  with the software adapter and under Linux (Marvisak/VIctory#2835).
+- Only the first scene was measured for the 10 fps figure; later scenes
+  are slower.
+- Textures start one mip level down (softer); ray-traced lighting is not
+  computed (the fork's ambient-light stand-in replaces it).
+- Characters' heads were missing in most runs; rebuilding the cache
+  folder's pipeline lists from scratch fixed it (move `pipelines` aside
+  once and let a run rebuild it).
+- `cool_fox` itself no longer answers on GitHub (404 since 2026-11-26);
+  this branch keeps its code as it was at `main`.
+
+Build with the diagnostics feature to get the frame statistics line the
+figures above come from:
+
+```powershell
+cargo build --release --locked -p victory --features diagnostics
+```
+
 ## Run the codec_d Windows build
 
 Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases/download/pareto-residency-37a410b1/cool_fox-pareto-residency-windows-x64.zip). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
