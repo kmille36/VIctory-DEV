@@ -58,6 +58,8 @@ mod pool;
 mod popwatch;
 mod port_journal;
 #[cfg(windows)]
+pub mod port_descriptors;
+#[cfg(windows)]
 mod primitive;
 pub mod query;
 pub mod queue;
