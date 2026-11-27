@@ -71,6 +71,31 @@ figures above come from:
 cargo build --release --locked -p victory --features diagnostics
 ```
 
+### Renderer ports (submit-thread work, added 2026-11-28)
+
+The 10 fps figure above was measured on a Core i7-13700KF, whose submit
+thread takes about 23–25 ms a frame. On a slower CPU the submit thread is
+far longer (about 195 ms a frame on a 32-thread Xeon), and the memory
+settings alone do not fix it. Four renderer ports, taken from
+Belobug/VIctory-Belobug-AMD, trustno1-coder/VIctory-NVIDIA (foxhound base)
+and fxceless/victory-fork and adapted to this tree, cut that thread's
+per-frame cost. All are off by default; each has a per-frame line on the
+diagnostics build's frame-rate line.
+
+| Port | Switch | What it does | Measured basis |
+|---|---|---|---|
+| LOOKUP_CACHE | `VICTORY_LOOKUP_CACHE=1` | Each recording thread keeps what its shadow lookups found (exact key, weak handles), so a hit skips the buffer-table lock walk and the windows-table lock | fxceless: about −14 ms a frame |
+| PORT_CONSTANTS (port 1) | `VICTORY_PORT_CONSTANTS=1` | The title's 32-bit graphics heap (185 MB, where its ring of constants lives) is opened as a D3D12 heap through a view of ours, so title buffers in it are placed in place: no host copy, no upload/download tracking, no compare pass | foxhound base: list-call translation 1,810 → 944 ms total thread time, submit 381 → 195 ms a frame |
+| PORT_GUARD (port 6) | `VICTORY_PORT_GUARD=1` | The guards' one lock becomes a read/write lock plus per-block atomic claims, so write faults and refreshes' guards no longer queue behind each other; refresh planning moves onto the beside threads (`VICTORY_PORT_GUARD_PLAN`, on by default when the port is on; `VICTORY_GUARD_HOT` stays off, it measured worse) | Belobug: title-thread waits about 29 → 2 ms a frame |
+| PORT_JOURNAL (port 7) | `VICTORY_PORT_JOURNAL=1` | The journal's page notes move into 64 sharded parts with a lock each, and a round of the heap-sync thread is asked for at the title's submit so it runs while the submission waits in the lane | Belobug: journal waits 8–9 → about 0.8 ms a frame of all threads, frame 1.3–2.9 ms faster |
+
+Honest limits: these ports were adapted and applied here but not yet
+built or run on this tree (no Rust toolchain on the machine that made
+them; the code is Windows-only), so their effect on this branch is
+unmeasured. They cut the submit thread's cost; they do not remove it —
+on a slow CPU the frame stays submit-bound, so expect a few fps more,
+not 10. The launcher `Play-GTA6-1660S.cmd` enables all four switches.
+
 ## Run the codec_d Windows build
 
 Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases/download/pareto-residency-37a410b1/cool_fox-pareto-residency-windows-x64.zip). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
