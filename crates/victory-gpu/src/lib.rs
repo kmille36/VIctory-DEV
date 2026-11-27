@@ -56,6 +56,7 @@ mod picked;
 mod pool;
 #[cfg(all(windows, feature = "diagnostics"))]
 mod popwatch;
+mod port_journal;
 #[cfg(windows)]
 mod primitive;
 pub mod query;
