@@ -97,6 +97,23 @@ unmeasured. They cut the submit thread's cost; they do not remove it —
 on a slow CPU the frame stays submit-bound, so expect a few fps more,
 not 10. The launcher `Play-GTA6-1660S.cmd` enables all five switches.
 
+### Render scale (added 2026-11-28)
+
+Belobug's `resolution.rs` ported verbatim (plus a minimal `frame_rate.rs`
+holding only the shared `Patched` enum; the frame-rate switch itself was
+not ported). Four switches, all off by default: `VICTORY_OUTPUT=<w>x<h>`
+(one of the title's own modes), `VICTORY_RENDER_SCALE=<s>` (**0.5–1.0**),
+`VICTORY_FFX_SCALE=<s>` (0.5–1.0), `VICTORY_UPSCALER=<kind>` (6 = the
+title's own, 7 = FidelityFX). On Series S the title picks FidelityFX, so
+`VICTORY_RENDER_SCALE` does nothing unless paired with
+`VICTORY_UPSCALER=6`; the launcher sets `UPSCALER=6` +
+`RENDER_SCALE=0.5` (960x540). Note: **0.4 (768x432) is not accepted** by
+Belobug's parser (0.5–1.0 only) — widening the range to 0.25–1.0 is a
+one-line change, not done; try 0.5 first. **Do not use
+`VICTORY_FFX_SCALE=0.5`** — it crashed on Series S in Belobug's run res-6
+(divide by zero). Same honest limit as the ports: unbuilt and unmeasured
+on this tree; on a submit-bound machine expect about +0.5–1 fps, not 10.
+
 ## Run the codec_d Windows build
 
 Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases/download/pareto-residency-37a410b1/cool_fox-pareto-residency-windows-x64.zip). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
