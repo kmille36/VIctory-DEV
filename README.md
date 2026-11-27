@@ -2,7 +2,7 @@
 
 ## Run the codec_d Windows build
 
-Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases#release-pareto-residency-37a410b1). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
+Download and extract the Windows x64 ZIP from the [private releases](https://github.com/kmille36/VIctory-DEV/releases/download/pareto-residency-37a410b1/cool_fox-pareto-residency-windows-x64.zip). Open PowerShell in the extracted folder and point the launcher at your own complete Xbox dump.
 
 ```powershell
 $env:VICTORY_GAME_DIR = 'D:\Games\MyDump'
