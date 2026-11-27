@@ -5009,7 +5009,7 @@ fn lookup(address: u64, len: u64, any: bool) -> Option<Arc<Shadow>> {
         LOOKUPS[0].fetch_add(1, Ordering::Relaxed);
         if shadow.window {
             // As `loose` notes an ask of a window it hands out.
-            note_window(shadow, address, address.saturating_add(len.max(1)), len <= 1);
+            note_window(&shadow, address, address.saturating_add(len.max(1)), len <= 1);
         }
         return Some(shadow);
     }
