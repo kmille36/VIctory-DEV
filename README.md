@@ -108,8 +108,7 @@ shared parser), `VICTORY_UPSCALER=<kind>` (6 = the
 title's own, 7 = FidelityFX). On Series S the title picks FidelityFX, so
 `VICTORY_RENDER_SCALE` does nothing unless paired with
 `VICTORY_UPSCALER=6`; the launcher sets `UPSCALER=6` +
-`RENDER_SCALE=0.4` (768x432). Below 0.25 the title faults in its own code,
-per victory-gtx1660's measurements. **Do not use
+`RENDER_SCALE=0.25` (480x270, the minimum — below 0.25 the title faults). **Do not use
 `VICTORY_FFX_SCALE=0.5`** — it crashed on Series S in Belobug's run res-6
 (divide by zero). Same honest limit as the ports: unbuilt and unmeasured
 on this tree; on a submit-bound machine expect about +0.5–1 fps, not 10.
