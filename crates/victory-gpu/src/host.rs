@@ -9068,6 +9068,9 @@ impl Meter {
                     crate::descriptor::host::STALE[4].load(Ordering::Relaxed)
                 );
             }
+            if let Some(line) = crate::texstore::line() {
+                tracing::info!("{line}");
+            }
             if crate::resource::held_only() || crate::resource::texture_mip_drop() > 0 {
                 let [copies, bytes, grown, whole] = [0, 1, 2, 3].map(|i| crate::resource::HELD[i].load(Ordering::Relaxed));
                 let [flipped, missed] = [0, 1].map(|i| crate::descriptor::host::FLIPPED[i].load(Ordering::Relaxed));
