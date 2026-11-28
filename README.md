@@ -76,7 +76,7 @@ cargo build --release --locked -p victory --features diagnostics
 The 10 fps figure above was measured on a Core i7-13700KF, whose submit
 thread takes about 23–25 ms a frame. On a slower CPU the submit thread is
 far longer (about 195 ms a frame on a 32-thread Xeon), and the memory
-settings alone do not fix it. Five renderer ports, taken from
+settings alone do not fix it. Seven renderer ports, taken from
 Belobug/VIctory-Belobug-AMD, trustno1-coder/VIctory-NVIDIA (foxhound base)
 and fxceless/victory-fork and adapted to this tree, cut that thread's
 per-frame cost. All are off by default; each has a per-frame line on the
@@ -89,13 +89,18 @@ diagnostics build's frame-rate line.
 | PORT_DESCRIPTORS (port 2) | `VICTORY_PORT_DESCRIPTORS=1` | The title's six descriptor-record stores are byte-checked and patched so they tell the layer which slots they wrote; sync_heaps takes only the marked slots, with a fallback that re-checks a few watch-written pages per frame (knobs `VICTORY_PORT_DESCRIPTORS_EVERY`, default 8 frames, and `VICTORY_PORT_DESCRIPTORS_CHECK`, default 16 pages) | Belobug: the old path cost 15–16 ms a frame of the heap-sync thread, 5–7 ms of it asking the watch |
 | PORT_GUARD (port 6) | `VICTORY_PORT_GUARD=1` | The guards' one lock becomes a read/write lock plus per-block atomic claims, so write faults and refreshes' guards no longer queue behind each other; refresh planning moves onto the beside threads (`VICTORY_PORT_GUARD_PLAN`, on by default when the port is on; `VICTORY_GUARD_HOT` stays off, it measured worse) | Belobug: title-thread waits about 29 → 2 ms a frame |
 | PORT_JOURNAL (port 7) | `VICTORY_PORT_JOURNAL=1` | The journal's page notes move into 64 sharded parts with a lock each, and a round of the heap-sync thread is asked for at the title's submit so it runs while the submission waits in the lane | Belobug: journal waits 8–9 → about 0.8 ms a frame of all threads, frame 1.3–2.9 ms faster |
+| TEXTURE_STORE | `VICTORY_TEXTURE_STORE=<folder>` (a folder path, not `1`) | Textures uploaded whole are kept (max 4 GB, in memory and in the folder) keyed by shape + digest of their smaller levels; a texture later first viewed from a higher level is made whole at once instead of staying blurred until streaming catches up | Belobug (run light-1): a slot written while its memory was absent waited 8.7 s on average to be shown; the store removes that wait |
+| PORT_CBV (port 5) | `VICTORY_PORT_CBV=1` | Shaders read constant buffers as raw bytes — a table's through the raw twin of its slot, a root one as root SRV `t<slot>` — so title-memory constants in place need no submit-time copies (some 23,000 a frame, about 9 MB, on Belobug's city figure) | Belobug: −4.7 ms a frame on AMD |
 
 Honest limits: these ports were adapted and applied here but not yet
 built or run on this tree (no Rust toolchain on the machine that made
 them; the code is Windows-only), so their effect on this branch is
 unmeasured. They cut the submit thread's cost; they do not remove it —
 on a slow CPU the frame stays submit-bound, so expect a few fps more,
-not 10. The launcher `Play-GTA6-1660S.cmd` enables all five switches.
+not 10. The launcher `Play-GTA6-1660S.cmd` enables all seven switches.
+TEXTURE_STORE's files are never trimmed, so its folder grows over time
+(delete it to reset the store); it assumes two same-shape textures
+sharing a ≥32 KB prefix share their larger levels.
 
 ### Render scale (added 2026-11-28)
 
