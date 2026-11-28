@@ -102,6 +102,33 @@ TEXTURE_STORE's files are never trimmed, so its folder grows over time
 (delete it to reset the store); it assumes two same-shape textures
 sharing a ≥32 KB prefix share their larger levels.
 
+### Wide copies (added 2026-11-28)
+
+Not a port — new code, written for this tree. The submit thread was the
+last single thread because the work it does is order-dependent, but the
+`copy_mapped` memcpys inside `run_deferred` are pure data movement: the
+bookkeeping around them can stay inline while the copies themselves are
+deferred. `VICTORY_WIDE_COPIES=1` (off by default, needs ≥4 logical CPUs)
+makes each `Step::Copy` enqueue `(dst, src, len)` into `Batch::copies`
+instead of copying inline; the queued copies run together through
+`shadow::wide_each` at the existing barriers — before any step that reads
+the title memory they wrote (`fill`, `flush`, `flush_one`, `Placed`,
+`Run`, `Texture`) and before the lists go to the card. Copies writing
+over one another are found by destination sort and run inline in
+submission order instead; a later copy reading bytes an earlier copy
+wrote is drained first, as is any copy a refresh or texture reads.
+Off, the Copy arm takes the old inline branch and every drain is a
+no-op, so the old path is intact for A/B testing.
+
+Honest limits: written and reviewed here but not yet built or run on
+this tree (no Rust toolchain on the machine that made it; the code is
+Windows-only). The gain depends on the Copy share of the submit thread,
+which is unmeasured — if copies are ~30 ms of the ~195 ms, expect ~+0.5
+fps; if ~60–80 ms and the drain sets split ~4-ways, up to ~6–7 fps. A
+pre-existing accounting quirk (mirrored from the fills): drain time
+inside a timed `run_deferred` arm is counted twice in `SPLIT[7]`, so
+compare fps and frame-ms first and treat `SPLIT[7]` as indicative only.
+
 ### Render scale (added 2026-11-28)
 
 Belobug's `resolution.rs` ported verbatim (plus a minimal `frame_rate.rs`
