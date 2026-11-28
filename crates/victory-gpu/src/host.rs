@@ -5645,6 +5645,10 @@ impl Host {
             }
             lists.push(list.list.cast().ok());
         }
+        // The copies not done yet are done first: the fills and the
+        // refreshes after them read the title memory they wrote, and
+        // the lists go to the card after them.
+        batch.drain_copies_all();
         batch.fill();
         stage.next("submit: the last refreshes");
         batch.flush();
@@ -7340,12 +7344,33 @@ impl HostList {
                         crate::port_journal::prep_wrote();
                     }
                     crate::port::copied(dst, src, len);
-                    copy_mapped(dst as *mut u8, src as *const u8, len, true);
+                    if wide_copies() && len > 0 {
+                        // The copies into the ranges this one writes and
+                        // reads that came before it are done first (a
+                        // later copy over the same range, or one reading
+                        // bytes an earlier copy wrote, must come after
+                        // them), and this one is done where a step reads
+                        // it ([`Batch::drain_copies`]).
+                        batch.drain_copies(&[(dst, dst + len), (src, src + len)]);
+                        batch.copies.push(Some((dst, src, len)));
+                        for page in (dst / crate::watch::PAGE)
+                            ..=(dst + len - 1) / crate::watch::PAGE
+                        {
+                            batch
+                                .copies_pages
+                                .entry(page)
+                                .or_default()
+                                .push(batch.copies.len() - 1);
+                        }
+                    } else {
+                        copy_mapped(dst as *mut u8, src as *const u8, len, true);
+                    }
                     // With the submission's one asking: the journal learns it.
                     crate::watch::wrote(dst, len);
                     // What the card holds there may be another value although
-                    // ours did not change.
-                    if send::own() {
+                    // ours did not change: sent after the copy is done, with
+                    // it ([`Batch::run_copy`]), not here.
+                    if !wide_copies() && send::own() {
                         crate::shadow::send_copied(dst, len);
                     }
                     (started, len)
@@ -7375,6 +7400,9 @@ impl HostList {
                     if free {
                         batch.title_written();
                     }
+                    // It reads title memory, and writes it when free: the
+                    // copies into either range are done first.
+                    batch.drain_copies(&[(p.src, p.src + p.len), (p.dst, p.dst + p.len)]);
                     if let Some(bytes) = p.prepare(free) {
                         batch.placed.push((p.shadow.clone(), p.dst, bytes));
                     }
@@ -7391,6 +7419,9 @@ impl HostList {
                 }
                 Step::Run(work) | Step::Host(work, _) => {
                     batch.fill();
+                    // It may read or write title memory anywhere: every
+                    // copy not done yet is done first.
+                    batch.drain_copies_all();
                     #[cfg(feature = "diagnostics")]
                     let started = std::time::Instant::now();
                     if matches!(step, Step::Run(_)) {
@@ -7433,6 +7464,10 @@ impl HostList {
                     if batch.texture_due(staging) {
                         batch.due.push(staging.clone());
                         if !wide_textures() {
+                            // It is refreshed now, from title memory: a
+                            // copy into it is done first.
+                            let (at, len) = staging.memory();
+                            batch.drain_copies(&[(at, at + len)]);
                             batch.refresh_textures();
                         }
                     }
@@ -7693,6 +7728,14 @@ struct Batch {
     placed: Vec<(std::sync::Arc<crate::shadow::Shadow>, usize, Vec<u8>)>,
     /// Fills not done yet (destination, source, bytes): [`wide_fills`].
     fills: Vec<(usize, usize, usize)>,
+    /// Copies into title memory not done yet (destination, source,
+    /// bytes), in the order the lists name them: [`wide_copies`]. An
+    /// entry done is `None`.
+    copies: Vec<Option<(usize, usize, usize)>>,
+    /// The pages ([`crate::watch::PAGE`]) the copies in `copies` write,
+    /// each with the places in `copies` that write it: a place done is
+    /// left here and skipped when met.
+    copies_pages: ByCopy<Vec<usize>>,
     /// Copies (by address) brought up to date ahead of the steps, and the
     /// range (from, to) ([`Batch::refresh_ahead`]).
     ahead: ByCopy<(usize, usize)>,
@@ -8068,6 +8111,50 @@ fn wide_fills() -> bool {
     *ON.get_or_init(|| std::env::var_os("VICTORY_WIDE_FILLS").is_none_or(|v| v != "0") && wide_refresh())
 }
 
+/// Whether the copies into title memory a submission's lists name are
+/// done together on several threads (`VICTORY_WIDE_COPIES=1`; off by
+/// default), instead of one after the other where the lists name them.
+///
+/// They are some 1,000 to 6,000 a frame, some 500 bytes each, of the
+/// submitting thread's time. Each reads title memory and writes title
+/// memory of its own, and touches nothing of another's but the range it
+/// writes; they are done before the next step that reads the title
+/// memory they wrote, and before the submission goes on from its steps.
+/// Off, they are done where the lists name them, as before.
+fn wide_copies() -> bool {
+    static ON: OnceLock<bool> = OnceLock::new();
+    *ON.get_or_init(|| {
+        wide_copies_enabled(
+            std::env::var("VICTORY_WIDE_COPIES").ok().as_deref(),
+            std::thread::available_parallelism().ok().map(|n| n.get()),
+        )
+    })
+}
+
+fn wide_copies_enabled(setting: Option<&str>, logical_cpus: Option<usize>) -> bool {
+    match setting {
+        Some("1") => logical_cpus.is_some_and(|n| n >= 4),
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod wide_copies_tests {
+    use super::wide_copies_enabled;
+
+    #[test]
+    fn wide_copies_is_off_by_default_and_needs_an_explicit_one() {
+        assert!(!wide_copies_enabled(None, Some(16)));
+        assert!(!wide_copies_enabled(None, Some(4)));
+        assert!(!wide_copies_enabled(Some("0"), Some(16)));
+        assert!(!wide_copies_enabled(Some("auto"), Some(16)));
+        assert!(wide_copies_enabled(Some("1"), Some(16)));
+        assert!(wide_copies_enabled(Some("1"), Some(4)));
+        assert!(!wide_copies_enabled(Some("1"), Some(2)));
+        assert!(!wide_copies_enabled(Some("1"), None));
+    }
+}
+
 /// Whether a submission's textures are brought up to date on several
 /// threads (`VICTORY_WIDE_TEXTURES=0`: one after the other, where the lists
 /// name them, as before).
@@ -8121,6 +8208,9 @@ impl Batch {
         if let Some(moved) = self.refreshes.get(at) {
             self.index.insert(std::sync::Arc::as_ptr(&moved.0) as usize, at);
         }
+        // This refresh reads title memory: a copy into its range is
+        // done first.
+        self.drain_copies(&[(from, to)]);
         #[cfg(feature = "diagnostics")]
         let started = std::time::Instant::now();
         if !(crate::watch::light() && shadow.nothing_new(from, to - from)) {
@@ -8340,6 +8430,113 @@ impl Batch {
         }
     }
 
+    /// The copies in `copies` one of `ranges` reads are done, in the
+    /// order the lists name them, and taken out: the title memory they
+    /// wrote is in place before the range is read. A copy is found by
+    /// the pages it writes (`copies_pages`); a range no copy writes
+    /// costs only the pages it covers. Nothing is done when the copies
+    /// are not spread over threads ([`wide_copies`]).
+    fn drain_copies(&mut self, ranges: &[(usize, usize)]) {
+        if !wide_copies() || ranges.is_empty() {
+            return;
+        }
+        // The places in `copies` that write a page one of the ranges
+        // covers, in the order the lists name them. Places whose copy
+        // is done are dropped from the page as they are met.
+        let mut at: Vec<usize> = Vec::new();
+        for &(from, to) in ranges {
+            if from >= to {
+                continue;
+            }
+            for page in (from / crate::watch::PAGE)..=(to - 1) / crate::watch::PAGE {
+                let Some(places) = self.copies_pages.get_mut(&page) else {
+                    continue;
+                };
+                places.retain(|&i| matches!(self.copies.get(i), Some(Some(_))));
+                at.extend_from_slice(places);
+            }
+        }
+        if at.is_empty() {
+            return;
+        }
+        at.sort_unstable();
+        at.dedup();
+        let mut set: Vec<(usize, usize, usize)> = Vec::new();
+        for i in at {
+            let Some(&copy) = self.copies.get(i).and_then(Option::as_ref) else {
+                continue;
+            };
+            // (A page is shared: the copy may write beside the range.)
+            if ranges.iter().any(|&(from, to)| copy.0 < to && from < copy.0 + copy.2) {
+                set.push(self.copies[i].take().unwrap());
+            }
+        }
+        Self::run_copies(set);
+    }
+
+    /// Every copy in `copies` is done, in the order the lists name them.
+    /// Nothing is done when the copies are not spread over threads.
+    fn drain_copies_all(&mut self) {
+        if !wide_copies() {
+            return;
+        }
+        let set: Vec<(usize, usize, usize)> =
+            self.copies.iter_mut().filter_map(Option::take).collect();
+        Self::run_copies(set);
+    }
+
+    /// A copy into title memory, done: the kernel copy, and what the
+    /// card holds there brought up to date after it. [`send_copied`]
+    /// reads the bytes the copy wrote, so it runs here, not where the
+    /// copy was named.
+    fn run_copy((dst, src, len): (usize, usize, usize)) {
+        copy_mapped(dst as *mut u8, src as *const u8, len, true);
+        if send::own() {
+            crate::shadow::send_copied(dst, len);
+        }
+    }
+
+    /// The copies in `set`, in the order the lists name them, are done.
+    /// Whether any two write over one another is found by destination:
+    /// then they run one after the other, in the order the lists name
+    /// them, as before; else they run together on several threads when
+    /// they are many, one after the other when they are few (as the
+    /// fills are done). The time counted is the time it took, not the
+    /// threads' sum.
+    fn run_copies(set: Vec<(usize, usize, usize)>) {
+        if set.is_empty() {
+            return;
+        }
+        let started = std::time::Instant::now();
+        // (Sorted by destination: a pair writes over one another only
+        // if neighbours do.)
+        let mut by_dst: Vec<(usize, usize)> =
+            set.iter().enumerate().map(|(i, &(dst, _, _))| (dst, i)).collect();
+        by_dst.sort_unstable();
+        let overlapping = by_dst.windows(2).any(|w| {
+            let (a, b) = (set[w[0].1], set[w[1].1]);
+            a.0 < b.0 + b.2 && b.0 < a.0 + a.2
+        });
+        // Below this many the threads cost more than they save.
+        const FEW: usize = 96;
+        const PART: usize = 64;
+        if overlapping || set.len() < FEW {
+            for copy in set {
+                Self::run_copy(copy);
+            }
+        } else {
+            crate::shadow::wide_each(set.len().div_ceil(PART), move |i| {
+                for &copy in set.iter().skip(i * PART).take(PART) {
+                    Self::run_copy(copy);
+                }
+            });
+        }
+        let took = started.elapsed();
+        PREPARING[0].fetch_add(took.as_micros() as u64, Ordering::Relaxed);
+        #[cfg(feature = "diagnostics")]
+        SPLIT[7].fetch_add(took.as_nanos() as u64, Ordering::Relaxed);
+    }
+
     /// The fills noted are done.
     fn fill(&mut self) {
         // Below this many the threads cost more than they save.
@@ -8347,6 +8544,16 @@ impl Batch {
         const PART: usize = 64;
         if self.fills.is_empty() {
             return;
+        }
+        // The fills read title memory: the copies into it that a fill
+        // reads are done first.
+        if wide_copies() {
+            let ranges: Vec<(usize, usize)> = self
+                .fills
+                .iter()
+                .map(|&(_, src, len)| (src, src + len))
+                .collect();
+            self.drain_copies(&ranges);
         }
         let started = std::time::Instant::now();
         if self.fills.len() < FEW {
@@ -8384,6 +8591,20 @@ impl Batch {
     }
 
     fn flush(&mut self) {
+        // The refreshes and the textures read title memory: the copies
+        // into it that they read are done first.
+        if wide_copies() {
+            let mut ranges: Vec<(usize, usize)> = self
+                .refreshes
+                .iter()
+                .map(|&(_, from, to)| (from, to))
+                .collect();
+            ranges.extend(self.due.iter().map(|staging| {
+                let (at, len) = staging.memory();
+                (at, at + len)
+            }));
+            self.drain_copies(&ranges);
+        }
         self.refresh_textures();
         self.index.clear();
         if self.refreshes.is_empty() {
